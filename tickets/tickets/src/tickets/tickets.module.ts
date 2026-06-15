@@ -1,0 +1,16 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { TicketsController } from './tickets.controller';
+import { TicketsService } from './tickets.service';
+import { Ticket } from './entities/ticket.entity';
+import { HttpClientService } from './common/httpl-client.service';
+
+@Module({
+  imports: [
+    TypeOrmModule.forFeature([Ticket]),
+  ],
+  controllers: [TicketsController],
+  providers: [TicketsService, HttpClientService],
+  exports: [TicketsService],
+})
+export class TicketsModule { }

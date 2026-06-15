@@ -1,0 +1,22 @@
+# Dependency directories
+node_modules/
+target/
+dist/
+
+# Archives
+*.rar
+*.zip
+*.tar.gz
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.settings/
+.classpath
+.project
+bin/
