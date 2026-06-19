@@ -1,7 +1,9 @@
 package ec.edu.espe.usuarios.services.impl;
 
+import ec.edu.espe.usuarios.dto.request.LoginRequest;
 import ec.edu.espe.usuarios.dto.request.UserCreateRequest;
 import ec.edu.espe.usuarios.dto.request.UserUpdateRequest;
+import ec.edu.espe.usuarios.dto.response.LoginResponse;
 import ec.edu.espe.usuarios.dto.response.PersonResponse;
 import ec.edu.espe.usuarios.dto.response.UserResponse;
 import ec.edu.espe.usuarios.entity.*;
@@ -9,8 +11,14 @@ import ec.edu.espe.usuarios.repository.PersonRepository;
 import ec.edu.espe.usuarios.repository.RoleRepository;
 import ec.edu.espe.usuarios.repository.UserRepository;
 import ec.edu.espe.usuarios.repository.UserRoleRepository;
+import ec.edu.espe.usuarios.security.JwtTokenProvider;
 import ec.edu.espe.usuarios.services.UserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +36,9 @@ public class UserServiceImpl implements UserService {
     private final PersonRepository personRepository;
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthenticationManager authenticationManager;
+    private final JwtTokenProvider jwtTokenProvider;
 
     @Override
     @Transactional
@@ -52,14 +63,18 @@ public class UserServiceImpl implements UserService {
 
         person = personRepository.save(person);
         
-        User user = User.builder()
+        String rawPassword = (userRequest.getPassword() != null && !userRequest.getPassword().trim().isEmpty())
+                ? userRequest.getPassword().trim()
+                : userRequest.getDni();
+        String encodedPassword = passwordEncoder.encode(rawPassword);
 
+        User user = User.builder()
                 .person(person)
                 .username(generarUsername(userRequest.getFirstName(), 
                 userRequest.getMiddleName(), 
                 userRequest.getLastName()))
-                .passwordHash(userRequest.getDni())
-                .passwordHashColumn(userRequest.getDni())
+                .passwordHash(encodedPassword)
+                .passwordHashColumn(encodedPassword)
                 .active(true)
                 .build();
         
@@ -225,5 +240,59 @@ public class UserServiceImpl implements UserService {
                 .person(personResponse)
                 .roles(roles)
                 .build();
+    }
+
+    @Override
+    @Transactional
+    public LoginResponse login(LoginRequest loginRequest) {
+        try {
+            Authentication authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            loginRequest.getUsername(),
+                            loginRequest.getPassword()
+                    )
+            );
+
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            String jwt = jwtTokenProvider.generateToken(authentication);
+
+            User user = userRepository.findByUsername(loginRequest.getUsername())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Usuario no encontrado"));
+            
+            user.setLastLogin(java.time.LocalDateTime.now());
+            userRepository.save(user);
+
+            List<String> roles = user.getUserRoles().stream()
+                    .filter(UserRole::getActive)
+                    .map(ur -> ur.getRole().getName())
+                    .collect(Collectors.toList());
+
+            return LoginResponse.builder()
+                    .token(jwt)
+                    .username(user.getUsername())
+                    .roles(roles)
+                    .expiresIn(jwtTokenProvider.getExpiryDuration())
+                    .build();
+        } catch (org.springframework.security.core.AuthenticationException e) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Credenciales incorrectas: " + e.getMessage());
+        }
+    }
+
+    @Override
+    @Transactional
+    public UserResponse register(UserCreateRequest registerRequest) {
+        // 1. Crear el usuario usando la lógica existente
+        UserResponse userResponse = createUser(registerRequest);
+
+        // 2. Buscar o crear el rol por defecto "USER"
+        Role role = roleRepository.findByNameIgnoreCase("USER")
+                .orElseGet(() -> roleRepository.save(Role.builder()
+                        .name("USER")
+                        .description("Default client/user role")
+                        .active(true)
+                        .build()));
+
+        // 3. Asignar el rol al usuario
+        return assigneRole(userResponse.getId(), role.getId());
     }
 }

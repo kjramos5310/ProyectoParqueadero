@@ -33,5 +33,6 @@ public class UserCreateRequest {
     private String phone;
     private String address;
     private String nationality;
+    private String password;
 
 }
